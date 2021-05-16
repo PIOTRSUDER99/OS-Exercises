@@ -1,0 +1,154 @@
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index bbfc6d440870..0d7f9a453cac 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -345,6 +345,9 @@
+ 334	common	rseq			__x64_sys_rseq
+ 424	common	pidfd_send_signal	__x64_sys_pidfd_send_signal
+ 434	common	pidfd_open		__x64_sys_pidfd_open
++435	common	get_log_level_call	__x64_sys_get_log_level_call
++436	common	set_log_level_call	__x64_sys_set_log_level_call
++437	common	log_message_call	__x64_sys_log_message_call
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+diff --git a/arch/x86/include/asm/syscalls.h b/arch/x86/include/asm/syscalls.h
+index 9fa979dd0d9d..4c0beeb64415 100644
+--- a/arch/x86/include/asm/syscalls.h
++++ b/arch/x86/include/asm/syscalls.h
+@@ -47,5 +47,10 @@ struct vm86_struct;
+ asmlinkage long sys_vm86old(struct vm86_struct __user *);
+ asmlinkage long sys_vm86(unsigned long, unsigned long);
+ 
++
++amslinkage int sys_get_log_level_call();
++amslinkage int sys_set_log_level_call(int new_level);
++amslinkage int sys_log_message_call(char* message, int level);
++
+ #endif /* CONFIG_X86_32 */
+ #endif /* _ASM_X86_SYSCALLS_H */
+diff --git a/init/main.c b/init/main.c
+index 02f6b6bd6a17..5fe0273d8307 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -1,13 +1,7 @@
+-/*
+- *  linux/init/main.c
+- *
+- *  Copyright (C) 1991, 1992  Linus Torvalds
+- *
+- *  GK 2/5/95  -  Changed to support mounting root fs via NFS
+- *  Added initrd & change_root: Werner Almesberger & Hans Lermen, Feb '96
+- *  Moan early if gcc is old, avoiding bogus kernels - Paul Gortmaker, May '96
+- *  Simplified starting of init:  Michael A. Griffith <grif@acm.org>
+- */
++/* * linux/init/main.c * * Copyright (C) 1991, 1992 Linus Torvalds * * GK 2/5/95 - Changed to support mounting 
++ root fs via NFS * Added initrd & change_root: Werner Almesberger & Hans Lermen, Feb '96 * Moan early if gcc is 
++ old, avoiding bogus kernels - Paul Gortmaker, May '96 * Simplified starting of init: Michael A. Griffith 
++ <grif@acm.org> */
+ 
+ #define DEBUG		/* Enable initcall_debug */
+ 
+@@ -119,6 +113,10 @@ bool early_boot_irqs_disabled __read_mostly;
+ enum system_states system_state __read_mostly;
+ EXPORT_SYMBOL(system_state);
+ 
++int log_level = 0;
++EXPORT_SYMBOL(log_level);
++
++
+ /*
+  * Boot command-line arguments
+  */
+@@ -1109,6 +1107,9 @@ static int __ref kernel_init(void *unused)
+ 	system_state = SYSTEM_RUNNING;
+ 	numa_default_policy();
+ 	
+ 	rcu_end_inkernel_boot();
+ 
+ 	if (ramdisk_execute_command) {
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 0a1cdee858de..5ed2ba5041f8 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2806,4 +2806,80 @@ COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
+ 
+ 	return 0;
+ }
++
++extern int log_level;
++
++SYSCALL_DEFINE0(get_log_level_call)
++{
++	return log_level;
++}
++
++SYSCALL_DEFINE1(set_log_level_call, int, new_level)
++{
++	if(new_level < 0 || new_level > 7)
++	{
++		return -1;
++	}
++
++	if(current_euid().val == 0)
++	{
++		log_level = new_level;
++		return log_level;
++	}
++	else 
++	{
++		return -1;
++	}
++}
++
++SYSCALL_DEFINE2(log_message_call, char*, message, int, level)
++{
++	if(level < 0 || level > 7)
++	{
++		return -1;
++	}
++
++	if(level <= log_level)
++	{
++		int pid = current->pid;
++		char* exec = current->comm;
++		if(level == 0)
++		{
++			printk(KERN_EMERG "PROC_OVERRIDE [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 1)
++		{
++			printk(KERN_ALERT "PROC_ALERT [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 2)
++		{
++			printk(KERN_CRIT "PROC_CRITICAL [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 3)
++		{
++			printk(KERN_ERR "PROC_ERROR [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 4)
++		{
++			printk(KERN_WARNING "PROC_WARNING [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 5)
++		{
++			printk(KERN_NOTICE "PROC_NOTICE [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 6)
++		{
++			printk(KERN_INFO "PROC_INFO [%s, %d]: %s",exec, pid, message);
++		}
++		else if(level == 7)
++		{
++			printk(KERN_DEBUG "PROC_DEBUG [%s, %d]: %s",exec, pid, message);
++		}
++
++		return level;
++	}
++	return level;
++
++}
++
+ #endif /* CONFIG_COMPAT */
